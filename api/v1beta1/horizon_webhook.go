@@ -28,7 +28,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -48,7 +47,6 @@ func SetupHorizonDefaults(defaults HorizonDefaults) {
 	horizonlog.Info("Horizon defaults initialized", "defaults", defaults)
 }
 
-var _ webhook.Defaulter = &Horizon{}
 
 // Default implements webhook.Defaulter so a webhook will be registered for the type
 func (r *Horizon) Default() {
@@ -71,7 +69,6 @@ func (spec *HorizonSpecCore) Default() {
 	// nothing here yet
 }
 
-var _ webhook.Validator = &Horizon{}
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type
 func (r *Horizon) ValidateCreate() (admission.Warnings, error) {
