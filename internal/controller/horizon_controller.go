@@ -24,6 +24,7 @@ import (
 	"maps"
 	"net/url"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -525,7 +526,7 @@ func (r *HorizonReconciler) reconcileInit(
 	}
 
 	servicePort := corev1.ServicePort{
-		Name:       endpointName,
+		Name:       string(service.EndpointPublic),
 		Port:       horizon.HorizonSvcPort,
 		TargetPort: intstr.FromInt32(horizon.HorizonPort),
 		Protocol:   corev1.ProtocolTCP,
@@ -572,9 +573,25 @@ func (r *HorizonReconciler) reconcileInit(
 			service.AnnotationIngressCreateKey: "false",
 		})
 		if svc.GetServiceType() == corev1.ServiceTypeLoadBalancer {
-			svc.AddAnnotation(map[string]string{
-				service.AnnotationHostnameKey: svc.GetServiceHostname(), // add annotation to register service name in dnsmasq
-			})
+			hostname := svc.GetServiceHostname()
+			// Clear override-provided DNS values before adding the endpoint's
+			// managed values: AddAnnotation merges via MergeStringMaps, which
+			// keeps any existing (user-supplied) value, so a stale hostname/cnames
+			// from the service override would otherwise win over the managed one.
+			svc.RemoveAnnotation(service.AnnotationHostnameKey)
+			svc.RemoveAnnotation(service.AnnotationCNAMEsKey)
+			annotations := map[string]string{service.AnnotationHostnameKey: hostname}
+			serverName, aliases, err := service.GetVHostServerName(*svcOverride, hostname)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+			annotations[service.AnnotationHostnameKey] = serverName
+			if len(aliases) > 0 {
+				annotations[service.AnnotationCNAMEsKey] = strings.Join(aliases, ",")
+			} else {
+				svc.RemoveAnnotation(service.AnnotationCNAMEsKey)
+			}
+			svc.AddAnnotation(annotations)
 		}
 	}
 
@@ -1092,13 +1109,25 @@ func (r *HorizonReconciler) generateServiceConfigMaps(
 		return err
 	}
 
+	defaultServerName := fmt.Sprintf("%s.%s.svc", horizon.ServiceName, instance.Namespace)
+	var serviceOverride service.RoutedOverrideSpec
+	if instance.Spec.Override.Service != nil {
+		serviceOverride = *instance.Spec.Override.Service
+	}
+	vhostServerName, serverAliases, err := service.GetVHostServerName(serviceOverride, defaultServerName)
+	if err != nil {
+		return err
+	}
+
 	templateParameters := map[string]any{
 		"keystoneURL":         authURL,
 		"horizonEndpoint":     instance.Status.Endpoint,
 		"horizonEndpointHost": url.Host,
 		"memcachedServers":    mc.GetMemcachedServerListQuotedString(),
 		"memcachedTLS":        mc.GetMemcachedTLSSupport(),
-		"ServerName":          fmt.Sprintf("%s.%s.svc", horizon.ServiceName, instance.Namespace),
+		"ServerName":          defaultServerName,
+		"VHostServerName":     vhostServerName,
+		"ServerAliases":       serverAliases,
 		"Port":                horizon.HorizonPort,
 		"TLS":                 false,
 		"isPublicHTTPS":       url.Scheme == "https",

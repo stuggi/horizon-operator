@@ -96,4 +96,48 @@ var _ = Describe("Horizon Webhook", func() {
 				"spec.topologyRef.namespace: Invalid value: \"namespace\": Customizing namespace field is not supported"),
 		)
 	})
+
+	It("accepts public port name and rejects wrong names on create and update", func() {
+		horizonWithPortName := func(name, portName string) *unstructured.Unstructured {
+			spec := GetDefaultHorizonSpec()
+			spec["override"] = map[string]any{
+				"service": map[string]any{
+					"spec": map[string]any{
+						"ports": []any{map[string]any{"name": portName, "port": int64(13778)}},
+					},
+				},
+			}
+			return &unstructured.Unstructured{Object: map[string]any{
+				"apiVersion": "horizon.openstack.org/v1beta1",
+				"kind":       "Horizon",
+				"metadata": map[string]any{
+					"name":      name,
+					"namespace": namespace,
+				},
+				"spec": spec,
+			}}
+		}
+
+		accepted := horizonWithPortName(horizonName.Name, "public")
+		_, err := controllerutil.CreateOrPatch(
+			th.Ctx, th.K8sClient, accepted, func() error { return nil })
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(th.DeleteInstance, accepted)
+
+		invalidCreate := horizonWithPortName(horizonName.Name+"-invalid", "wrong")
+		_, err = controllerutil.CreateOrPatch(
+			th.Ctx, th.K8sClient, invalidCreate, func() error { return nil })
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring(`must be "public"`))
+
+		current := &horizonv1.Horizon{}
+		current.Name = horizonName.Name
+		current.Namespace = horizonName.Namespace
+		_, err = controllerutil.CreateOrPatch(th.Ctx, th.K8sClient, current, func() error {
+			current.Spec.Override.Service.Spec.Ports[0].Name = "wrong"
+			return nil
+		})
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring(`must be "public"`))
+	})
 })

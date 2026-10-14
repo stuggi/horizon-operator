@@ -23,6 +23,8 @@ limitations under the License.
 package v1beta1
 
 import (
+	"github.com/openstack-k8s-operators/lib-common/modules/common/service"
+	commonwebhook "github.com/openstack-k8s-operators/lib-common/modules/common/webhook"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -78,6 +80,7 @@ func (r *Horizon) ValidateCreate() (admission.Warnings, error) {
 	// When a TopologyRef CR is referenced, fail if a different Namespace is
 	// referenced because is not supported
 	allErrs = append(allErrs, r.Spec.ValidateTopology(basePath, r.Namespace)...)
+	allErrs = append(allErrs, validateServicePortNames(basePath, r.Spec.Override.Service)...)
 
 	if len(allErrs) != 0 {
 		return nil, apierrors.NewInvalid(
@@ -97,6 +100,7 @@ func (r *Horizon) ValidateUpdate(old runtime.Object) (admission.Warnings, error)
 	// When a TopologyRef CR is referenced, fail if a different Namespace is
 	// referenced because is not supported
 	allErrs = append(allErrs, r.Spec.ValidateTopology(basePath, r.Namespace)...)
+	allErrs = append(allErrs, validateServicePortNames(basePath, r.Spec.Override.Service)...)
 
 	if len(allErrs) != 0 {
 		return nil, apierrors.NewInvalid(
@@ -104,6 +108,17 @@ func (r *Horizon) ValidateUpdate(old runtime.Object) (admission.Warnings, error)
 			r.Name, allErrs)
 	}
 	return nil, nil
+}
+
+func validateServicePortNames(basePath *field.Path, override *service.RoutedOverrideSpec) field.ErrorList {
+	if override == nil || override.Spec == nil {
+		return nil
+	}
+	return commonwebhook.ValidateServicePortNames(
+		basePath.Child("override").Child("service").Child("spec").Child("ports"),
+		override.Spec.Ports,
+		"public",
+	)
 }
 
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type
